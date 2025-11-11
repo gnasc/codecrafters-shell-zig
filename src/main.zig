@@ -9,7 +9,9 @@ const stdin = &stdin_reader.interface;
 
 pub fn main() !void {
     // TODO: Uncomment the code below to pass the first stage
-    try stdout.print("$ ", .{});
-    const command = try stdin.takeDelimiter('\n');
-    try stdout.print("{s}: command not found", .{command.?});
+    while(true) {
+        try stdout.print("$ ", .{});
+        const command = try stdin.takeDelimiter('\n');
+        try stdout.print("{s}: command not found\n", .{command.?});
+    }
 }
