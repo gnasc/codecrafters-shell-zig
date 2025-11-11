@@ -3,6 +3,7 @@ const std = @import("std");
 const Commands = enum{
     exit,
     echo,
+    type,
     not_found,
 };
 
@@ -35,6 +36,14 @@ pub fn main() !void {
                     } else {
                         try stdout.print("{s}\n", .{arg});
                     }
+                }
+            },
+            .type => {
+                const str_arg_command = it.next().?;
+                const arg_command = std.meta.stringToEnum(Commands, str_arg_command) orelse .not_found;
+                switch(arg_command) {
+                    .not_found => try stdout.print("{s}: command not found\n", .{str_arg_command}),
+                    else => try stdout.print("{s} is a shell builtin\n", .{str_arg_command}),
                 }
             },
             else => try stdout.print("{s}: command not found\n", .{str_command}),
