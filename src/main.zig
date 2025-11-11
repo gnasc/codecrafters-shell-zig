@@ -42,7 +42,7 @@ pub fn main() !void {
                 const str_arg_command = it.next().?;
                 const arg_command = std.meta.stringToEnum(Commands, str_arg_command) orelse .not_found;
                 switch(arg_command) {
-                    .not_found => try stdout.print("{s}: command not found\n", .{str_arg_command}),
+                    .not_found => try stdout.print("{s}: not found\n", .{str_arg_command}),
                     else => try stdout.print("{s} is a shell builtin\n", .{str_arg_command}),
                 }
             },
