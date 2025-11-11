@@ -2,6 +2,7 @@ const std = @import("std");
 
 const Commands = enum{
     exit,
+    echo,
     not_found,
 };
 
@@ -22,10 +23,19 @@ pub fn main() !void {
         const command = std.meta.stringToEnum(Commands, str_command) orelse .not_found;
 
         switch(command) {
-            .exit => blk: {
-                const str_code = it.peek().?;
+            .exit => {
+                const str_code = it.next().?;
                 const code = try std.fmt.parseUnsigned(u8, str_code, 10);
-                break :blk std.process.exit(code);
+                std.process.exit(code);
+            },
+            .echo => {
+                while(it.next()) |arg| {
+                    if(it.peek() != null) {
+                        try stdout.print("{s} ", .{arg});
+                    } else {
+                        try stdout.print("{s}\n", .{arg});
+                    }
+                }
             },
             else => try stdout.print("{s}: command not found\n", .{str_command}),
         }
