@@ -1,11 +1,53 @@
 const std = @import("std");
 
+const TokenIterator = std.mem.TokenIterator(u8, .any);
+const Writer = std.Io.Writer;
+
 const Commands = enum{
     exit,
     echo,
     type,
     not_found,
 };
+
+fn shellEcho(iterator: *TokenIterator, writer: *Writer) !void {
+    while(iterator.next()) |arg| {
+        if(iterator.peek() != null) {
+            try writer.print("{s} ", .{arg});
+        } else {
+            try writer.print("{s}\n", .{arg});
+        }
+    }
+}
+
+fn shellTypeSearch(allocator: std.mem.Allocator) !void {
+    var env_map = try std.process.getEnvMap(allocator);
+    defer env_map.deinit();
+
+    const PATH_ENV = env_map.get("PATH").?;
+    std.debug.print("{s}", .{PATH_ENV});
+}
+
+fn shellType(iterator: *TokenIterator, writer: *Writer) !void  {
+    const str_arg_command = iterator.next().?;
+    const arg_command = std.meta.stringToEnum(Commands, str_arg_command) orelse .not_found;
+    
+    switch(arg_command) {
+        .not_found => try writer.print("{s}: not found\n", .{str_arg_command}),
+        else => {
+            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+            defer {
+                const status = gpa.deinit();
+                if(status == .leak) @panic("GPA Error!");
+            }
+            
+            const allocator = gpa.allocator();
+
+            try shellTypeSearch(allocator);//try writer.print("{s} is a shell builtin\n", .{str_arg_command}),
+        },
+    }
+    
+}
 
 var stdout_writer = std.fs.File.stdout().writerStreaming(&.{});
 const stdout = &stdout_writer.interface;
@@ -29,23 +71,8 @@ pub fn main() !void {
                 const code = try std.fmt.parseUnsigned(u8, str_code, 10);
                 std.process.exit(code);
             },
-            .echo => {
-                while(it.next()) |arg| {
-                    if(it.peek() != null) {
-                        try stdout.print("{s} ", .{arg});
-                    } else {
-                        try stdout.print("{s}\n", .{arg});
-                    }
-                }
-            },
-            .type => {
-                const str_arg_command = it.next().?;
-                const arg_command = std.meta.stringToEnum(Commands, str_arg_command) orelse .not_found;
-                switch(arg_command) {
-                    .not_found => try stdout.print("{s}: not found\n", .{str_arg_command}),
-                    else => try stdout.print("{s} is a shell builtin\n", .{str_arg_command}),
-                }
-            },
+            .echo => try shellEcho(&it, stdout),
+            .type => try shellType(&it, stdout),
             else => try stdout.print("{s}: command not found\n", .{str_command}),
         }
 
