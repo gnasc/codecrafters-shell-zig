@@ -1,23 +1,53 @@
 const std = @import("std");
 
-const TokenIterator = std.mem.TokenIterator(u8, .any);
-const Writer = std.Io.Writer;
+const Command = union(enum) {
+    exit: u8,
+    echo: []const u8,
+    type: []const u8,
+    not_found: []const u8,
 
-const Commands = enum{
-    exit,
-    echo,
-    type,
-    not_found,
+    const map = createMap();
+
+    fn createMap() std.StaticStringMap(Command) {
+        const ssm = std.StaticStringMap(Command);
+        
+         const field_map = ssm.initComptime(blk: {
+            const fields = @typeInfo(Command).@"union".fields;
+            var result: [fields.len] struct { []const u8, Command } = undefined;
+
+            inline for(fields, 0..) |field, i| {
+                const command_init = switch(field.type) {
+                    u8 => @unionInit(Command, field.name, 0),
+                    []const u8 => @unionInit(Command, field.name, ""),
+                    else => @unionInit(Command, field.name, void{}),
+                };
+                
+                result[i] = .{ field.name, command_init };
+            }
+            
+            const final = result;
+            break :blk final;
+        });
+
+        return field_map;
+    }
+
 };
 
-fn shellEcho(iterator: *TokenIterator, writer: *Writer) !void {
-    while(iterator.next()) |arg| {
-        if(iterator.peek() != null) {
-            try writer.print("{s} ", .{arg});
-        } else {
-            try writer.print("{s}\n", .{arg});
-        }
-    }
+fn parseStdin(input: []const u8, delimiters: []const u8) !Command {
+    var iterator = std.mem.tokenizeAny(u8, input, delimiters);
+    const first = iterator.next().?;
+    var command = Command.map.get(first) orelse @unionInit(Command, "not_found", first);
+
+    if(iterator.peek()) |token| {
+        switch(command) {
+            .exit => |*value| value.* = try std.fmt.parseUnsigned(u8, token, 10),
+            .echo, .type => |*value| value.* = iterator.rest(),
+            .not_found => |*value| value.* = first,
+        }            
+    }    
+        
+    return command;
 }
 
 fn shellTypeSearch(allocator: std.mem.Allocator) !void {
@@ -28,25 +58,13 @@ fn shellTypeSearch(allocator: std.mem.Allocator) !void {
     std.debug.print("{s}", .{PATH_ENV});
 }
 
-fn shellType(iterator: *TokenIterator, writer: *Writer) !void  {
-    const str_arg_command = iterator.next().?;
-    const arg_command = std.meta.stringToEnum(Commands, str_arg_command) orelse .not_found;
-    
-    switch(arg_command) {
-        .not_found => try writer.print("{s}: not found\n", .{str_arg_command}),
-        else => {
-            var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-            defer {
-                const status = gpa.deinit();
-                if(status == .leak) @panic("GPA Error!");
-            }
-            
-            const allocator = gpa.allocator();
+fn shellType(args: []const u8, writer: *std.Io.Writer) !void {
+    const command = try parseStdin(args, " \n");
 
-            try shellTypeSearch(allocator);//try writer.print("{s} is a shell builtin\n", .{str_arg_command}),
-        },
+    switch(command) {
+        .not_found => |value| try writer.print("{s}: not found\n", .{value}),
+        else => try writer.print("{s} is a shell builtin\n", .{@tagName(command)}),
     }
-    
 }
 
 var stdout_writer = std.fs.File.stdout().writerStreaming(&.{});
@@ -60,21 +78,13 @@ pub fn main() !void {
     while(true) {
         try stdout.print("$ ", .{});
         const input = try stdin.takeDelimiter('\n');
-
-        var it = std.mem.tokenizeAny(u8, input.?, " \n");
-        const str_command = it.next().?;
-        const command = std.meta.stringToEnum(Commands, str_command) orelse .not_found;
+        const command = try parseStdin(input.?, " \n");
 
         switch(command) {
-            .exit => {
-                const str_code = it.next().?;
-                const code = try std.fmt.parseUnsigned(u8, str_code, 10);
-                std.process.exit(code);
-            },
-            .echo => try shellEcho(&it, stdout),
-            .type => try shellType(&it, stdout),
-            else => try stdout.print("{s}: command not found\n", .{str_command}),
+            .exit => |value| std.process.exit(value),
+            .echo => |value| try stdout.print("{s}\n", .{value}),
+            .type => |value| try shellType(value, stdout),
+            .not_found => |value| try stdout.print("{s}: command not found\n", .{value}),
         }
-
     }
 }
