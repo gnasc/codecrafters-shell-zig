@@ -50,19 +50,54 @@ fn parseStdin(input: []const u8, delimiters: []const u8) !Command {
     return command;
 }
 
-fn shellTypeSearch(allocator: std.mem.Allocator) !void {
-    var env_map = try std.process.getEnvMap(allocator);
-    defer env_map.deinit();
+fn shellSearch(allocator: std.mem.Allocator, paths: []const u8, file: []const u8) !?[]u8 {
+    const delimiter = std.fs.path.delimiter;
+    var path_iterator = std.mem.tokenizeAny(u8, paths, &.{delimiter});
+    
+    while(path_iterator.next()) |path| {
+        var dir = try std.fs.openDirAbsolute(path, .{ .iterate = true });
+        defer dir.close();
 
-    const PATH_ENV = env_map.get("PATH").?;
-    std.debug.print("{s}", .{PATH_ENV});
+        var dir_iterator = dir.iterate();
+        while(try dir_iterator.next()) |entry| {
+            const stat = try dir.statFile(entry.name);
+            if(std.mem.eql(u8, entry.name, file) and stat.mode & 0o111 != 0){
+                const full_path = try std.fs.path.join(allocator, &[_][]const u8{ path , entry.name });
+                
+                return full_path;
+            }
+        }
+    }
+
+    return null;
 }
 
 fn shellType(args: []const u8, writer: *std.Io.Writer) !void {
     const command = try parseStdin(args, " \n");
 
     switch(command) {
-        .not_found => |value| try writer.print("{s}: not found\n", .{value}),
+        .not_found => |value| {
+            var gpa = std.heap.DebugAllocator(.{}){};
+            defer {
+                const status = gpa.deinit();
+                std.debug.assert(status == .ok);
+            }
+
+            const allocator = gpa.allocator();
+
+            var env_map = try std.process.getEnvMap(allocator);
+            defer env_map.deinit();
+
+            const PATH_ENV = env_map.get("PATH").?;
+            const path = try shellSearch(allocator, PATH_ENV, value);
+
+            if(path) |p| {
+                defer allocator.free(path.?);
+                try writer.print("{s} is {s}\n", .{value, p});
+            } else {
+                try writer.print("{s}: not found\n", .{value});
+            }
+        },
         else => try writer.print("{s} is a shell builtin\n", .{@tagName(command)}),
     }
 }
