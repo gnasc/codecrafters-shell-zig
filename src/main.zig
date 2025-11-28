@@ -1,49 +1,51 @@
 const std = @import("std");
 
-const Command = union(enum) {
-    exit: ?[]const u8,
-    echo: []const u8,
-    type: []const u8,
+const CommandTag = enum{ exit, echo, type };
+const CommandKind = enum{ builtin, external, invalid, empty };
 
-    fn execute(self: Command, args: []const u8, writer: *std.Io.Writer) void {
-        switch(self) {
-            .exit => shellExit(args),
-            .echo => shellEcho(args, writer),
-            .type => shellType(args, writer),
-        }
-    }
-};
+const Statement = struct {
+    tag: ?CommandTag,
+    kind: CommandKind,
+    args: []const u8,
 
-const Statement = union(enum) {
-    builtin: Command,
-    invalid: []const u8,
-    empty: void,
-
-    fn initFromString(argv: []const u8) !Statement {
+    fn initFromString(args: []const u8) !Statement {
         const delimiters = " ";
-        var iterator = std.mem.tokenizeAny(u8, argv, delimiters);
+        var iterator = std.mem.tokenizeAny(u8, args, delimiters);
+
         const first_arg = iterator.next() orelse {
-            return Statement{ .empty = {} };
+            return Statement{ .tag = null, .kind = .empty, .args = "" };
         };
 
-        const CommandTagType = @typeInfo(Command).@"union".tag_type.?;
-        const tag = std.meta.stringToEnum(CommandTagType, first_arg) orelse {
-            return Statement{ .invalid = first_arg };
+        const tag = std.meta.stringToEnum(CommandTag, first_arg) orelse {
+            return Statement{ .tag = null, .kind = .invalid, .args = first_arg };
         };
 
-        return Statement{ .builtin = command };
+        return Statement{ .tag = tag, .kind = .builtin, .args = iterator.rest() };
+    }
+
+    fn execute(self: Statement, writer: *std.Io.Writer) !void {
+        switch(self.kind) {
+            .builtin => switch(self.tag.?) {
+                .exit => shellExit(self.args),
+                .echo => try shellEcho(self.args, writer),
+                .type => try shellType(self.args, writer),
+            },
+            .external => {},
+            .invalid => try writer.print("{s}: command not found\n", .{self.args}),
+            .empty => {},
+        }
+
+
     }
 };
 
-fn shellExit(args: ?[]const u8) !void {
-    var code = 0;
-    if(args) |a| code = try std.fmt.parseUnsigned(a);
-
+fn shellExit(args: []const u8) void {
+    const code: u8 = std.fmt.parseUnsigned(u8, args, 10) catch 0;
     std.process.exit(code);
 }
 
 fn shellEcho(args: []const u8, writer: *std.Io.Writer) !void {
-    try writer.print("{s}", .{args});
+    try writer.print("{s}\n", .{args});
 }
 
 fn shellSearchExec(allocator: std.mem.Allocator, paths: []const u8, name: []const u8) !?[]u8 {
@@ -69,12 +71,12 @@ fn shellSearchExec(allocator: std.mem.Allocator, paths: []const u8, name: []cons
 }
 
 fn shellType(args: []const u8, writer: *std.Io.Writer) !void {
-    const stmt = Statement.initFromString(args);
+    const stmt = try Statement.initFromString(args);
     
-    switch(stmt) {
-        .builtin => try writer.print("{s} is a shell builtin"),
-        .empty => try writer.print("no argument provided"),
-        .invalid => |command| {
+    switch(stmt.kind) {
+        .builtin => try writer.print("{s} is a shell builtin\n", .{@tagName(stmt.tag.?)}),
+        .empty => try writer.print("no argument provided\n", .{}),
+        .invalid => {
             var gpa = std.heap.DebugAllocator(.{}){};
             defer {
                 const status = gpa.deinit();
@@ -82,17 +84,19 @@ fn shellType(args: []const u8, writer: *std.Io.Writer) !void {
             }
 
             const allocator = gpa.allocator();
-            const PATH_ENV = std.process.getEnvVarOwned(allocator, "PATH");
-            
-            const maybe_path = try shellSearchExec(allocator, PATH_ENV, command);
+            const PATH_ENV = try std.process.getEnvVarOwned(allocator, "PATH");
+            defer allocator.free(PATH_ENV);
+
+            const maybe_path = try shellSearchExec(allocator, PATH_ENV, stmt.args);
 
             if (maybe_path) |path| {
-                defer allocator.free(path.?);
-                try writer.print("{s} is {s}\n", .{ command, path });
+                defer allocator.free(path);
+                try writer.print("{s} is {s}\n", .{ stmt.args, path });
             } else {
-                try writer.print("{s}: not found\n", .{command});
+                try writer.print("{s}: not found\n", .{stmt.args});
             }
-        }
+        },
+        else => {},
     }
 }
 
@@ -138,12 +142,6 @@ pub fn main() !void {
         try stdout.print("$ ", .{});
         const input = try stdin.takeDelimiter('\n');
         const stmt = try Statement.initFromString(input.?);
-        std.debug.print("{any}", .{stmt});
-
-        switch (stmt) {
-            .builtin => |command| command.execute(stdout),
-            .invalid => |name| try stdout.print("{s}: command not found\n", .{name}),
-            .empty => {}
-        }
+        try stmt.execute(stdout);
     }
 }
