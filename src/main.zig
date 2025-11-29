@@ -24,8 +24,9 @@ const Statement = struct {
 
             if(maybe_path) |path| {
                 var arg_array = try std.ArrayList([]const u8).initCapacity(allocator, 64);
+                _ = path;
 
-                try arg_array.append(allocator, path);
+                iterator.reset();
 
                 while(iterator.next()) |token| {
                     try arg_array.append(allocator, token);
