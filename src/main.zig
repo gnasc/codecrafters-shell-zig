@@ -24,7 +24,7 @@ const Statement = struct {
 
             if(maybe_path) |path| {
                 var arg_array = try std.ArrayList([]const u8).initCapacity(allocator, 64);
-                _ = path;
+                try arg_array.append(allocator, path);
 
                 iterator.reset();
 
@@ -93,28 +93,16 @@ fn shellType(allocator: std.mem.Allocator, args: []const u8, writer: *std.Io.Wri
     
     switch(stmt.kind) {
         .builtin => try writer.print("{s} is a shell builtin\n", .{@tagName(stmt.tag.?)}),
+        .external => try writer.print("{s} is {s}\n", .{ stmt.args.multiple[1], stmt.args.multiple[0] }),
         .empty => try writer.print("no argument provided\n", .{}),
-        .invalid => {
-            const PATH_ENV = try std.process.getEnvVarOwned(allocator, "PATH");
-            defer allocator.free(PATH_ENV);
-
-            const maybe_path = try shellSearchExec(allocator, PATH_ENV, stmt.args.single);
-
-            if (maybe_path) |path| {
-                defer allocator.free(path);
-                try writer.print("{s} is {s}\n", .{ stmt.args.single, path });
-            } else {
-                try writer.print("{s}: not found\n", .{stmt.args.single});
-            }
-        },
-        else => {},
+        .invalid => try writer.print("{s}: not found\n", .{stmt.args.single}),
     }
 }
 
 fn shellExec(allocator: std.mem.Allocator, args: [][]const u8, writer: *std.Io.Writer) !void {
     const result = try std.process.Child.run(.{
         .allocator = allocator,
-        .argv = args,
+        .argv = args[1..],
     });
         
     try writer.print("{s}", .{result.stdout});
