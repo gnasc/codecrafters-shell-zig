@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const CommandTag = enum{ exit, echo, type, pwd };
+const CommandTag = enum{ exit, echo, type, pwd, cd };
 const CommandKind = enum{ builtin, external, invalid, empty };
 
 const Statement = struct {
@@ -50,6 +50,7 @@ const Statement = struct {
                 .echo => try shellEcho(self.args.single, writer),
                 .type => try shellType(allocator, self.args.single, writer),
                 .pwd => try shellPwd(writer), 
+                .cd => try shellCd(self.args.single, writer),
             },
             .external => try shellExec(allocator, self.args.multiple, writer),
             .invalid => try writer.print("{s}: command not found\n", .{self.args.single}),
@@ -71,6 +72,12 @@ fn shellPwd(writer: *std.Io.Writer) !void {
     var cwd_buffer: [1024]u8 = undefined;
     const cwd = try std.process.getCwd(&cwd_buffer);
     try writer.print("{s}\n", .{cwd});
+}
+
+fn shellCd(args: []const u8, writer: *std.Io.Writer) !void {
+    std.posix.chdir(args) catch {
+        try writer.print("{s}: No such file or directory\n", .{args});  
+    };
 }
 
 fn shellSearchExec(allocator: std.mem.Allocator, paths: []const u8, name: []const u8) !?[]u8 {
