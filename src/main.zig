@@ -50,7 +50,7 @@ const Statement = struct {
                 .echo => try shellEcho(self.args.single, writer),
                 .type => try shellType(allocator, self.args.single, writer),
                 .pwd => try shellPwd(writer), 
-                .cd => try shellCd(self.args.single, writer),
+                .cd => try shellCd(allocator, self.args.single, writer),
             },
             .external => try shellExec(allocator, self.args.multiple, writer),
             .invalid => try writer.print("{s}: command not found\n", .{self.args.single}),
@@ -74,8 +74,13 @@ fn shellPwd(writer: *std.Io.Writer) !void {
     try writer.print("{s}\n", .{cwd});
 }
 
-fn shellCd(args: []const u8, writer: *std.Io.Writer) !void {
-    std.posix.chdir(args) catch {
+fn shellCd(allocator: std.mem.Allocator, args: []const u8, writer: *std.Io.Writer) !void {
+    const PATH_ENV = try std.process.getEnvVarOwned(allocator, "HOME");
+    defer allocator.free(PATH_ENV);
+        
+    const real_path = try std.mem.replaceOwned(u8, allocator, args, "~", PATH_ENV);
+
+    std.posix.chdir(real_path) catch {
         try writer.print("{s}: No such file or directory\n", .{args});  
     };
 }
